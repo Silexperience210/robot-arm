@@ -1,6 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
+  CAL_DEFAULT,
+  fromFirmware,
+  toFirmware,
+  type CalEntry,
+} from "./calibration";
+import {
   clampJoints,
   dist,
   durationFor,
@@ -21,6 +27,7 @@ import {
   PRINTER,
   BIN_POS,
   BIN_RIGHT,
+  JOINT_META,
   type JogMode,
   type JogStep,
   type JointId,
@@ -51,6 +58,7 @@ type ArmStore = {
   held: boolean;
   ultrasonic: number;
   listening: boolean;
+  halted: boolean;
   transcript: string;
   lastHeard: string;
   lastCommand: string;
@@ -68,6 +76,8 @@ type ArmStore = {
   aiBusy: boolean;
   camUrl: string;
   camLive: boolean;
+  calibration: Record<JointId, CalEntry>;
+  setCalEntry: (id: JointId, entry: Partial<CalEntry>) => void;
   jogMode: JogMode;
   jogStep: JogStep;
   focusId: string | null;
@@ -125,7 +135,8 @@ let inSeg = false;
 function sendPose(joints?: Joints) {
   if (!socket || socket.readyState !== WebSocket.OPEN) return;
   const { target, speed } = useArm.getState();
-  socket.send(JSON.stringify({ t: "pose", j: joints ?? target, spd: speed }));
+  const cal = useArm.getState().calibration;
+  socket.send(JSON.stringify({ t: "pose", j: toFirmware(joints ?? target, cal), spd: speed }));
 }
 
 function startSeg(from: Joints, to: Joints, speed: number, holdMs: number) {
@@ -167,6 +178,7 @@ export const useArm = create<ArmStore>()(
       held: false,
       ultrasonic: 18,
       listening: false,
+      halted: false,
       transcript: "",
       lastHeard: "",
       lastCommand: "",
@@ -184,6 +196,14 @@ export const useArm = create<ArmStore>()(
       aiBusy: false,
       camUrl: "http://192.168.4.2:81/stream",
       camLive: false,
+      calibration: { ...CAL_DEFAULT },
+      setCalEntry: (id, entry) =>
+        set((s) => ({
+          calibration: {
+            ...s.calibration,
+            [id]: { ...s.calibration[id], ...entry },
+          },
+        })),
       jogMode: "cart",
       jogStep: 8,
       focusId: "fail",
@@ -324,6 +344,33 @@ export const useArm = create<ArmStore>()(
             set({ connected: true, connecting: false });
             get().log("system", "T-Display S3 en ligne");
             sendPose();
+          };
+          ws.onmessage = (ev) => {
+            // Miroir : la carte broadcast `state` (angles servo, US, batterie).
+            let d: { t?: string; j?: Record<string, number>; us?: number; v?: number; halt?: boolean };
+            try {
+              d = JSON.parse(String(ev.data));
+            } catch {
+              return;
+            }
+            if (d?.t !== "state") return;
+            const cal = get().calibration;
+            if (d.j && typeof d.j === "object") {
+              const firm: Joints = {} as Joints;
+              (Object.keys(JOINT_META) as JointId[]).forEach((k) => {
+                if (typeof d.j![k] === "number") firm[k] = d.j![k];
+              });
+              const geo = fromFirmware(firm, cal);
+              // On ne reprend la main que hors séquence (un waypoint en cours gagne).
+              if (get().playMode === "idle") {
+                visual.current = clampJoints({ ...visual.current, ...geo });
+              }
+            }
+            const patch: Partial<ArmStore> = {};
+            if (typeof d.us === "number") patch.ultrasonic = d.us;
+            if (typeof d.v === "number") patch.batteryV = d.v;
+            if (typeof d.halt === "boolean") patch.halted = d.halt;
+            if (Object.keys(patch).length) set(patch);
           };
           ws.onclose = () => {
             if (socket === ws) {

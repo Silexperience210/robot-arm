@@ -1,5 +1,7 @@
 import { Download, Radio, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { JOINT_IDS, JOINT_META, type JointId } from "@/lib/arm/types";
+import { CAL_DEFAULT } from "@/lib/arm/calibration";
 import {
   CAM_FLASH_STEPS,
   ESP32_CAM,
@@ -13,6 +15,58 @@ import { CAM_INO, downloadKitZip, downloadPublic, downloadText, FIRMWARE_INO, KI
 import { useArm } from "@/lib/arm/store";
 import { cn } from "@/lib/utils";
 import { TDisplay } from "./TDisplay";
+
+function CalRow({ id }: { id: JointId }) {
+  const cal = useArm((s) => s.calibration[id]);
+  const setCalEntry = useArm((s) => s.setCalEntry);
+  const meta = JOINT_META[id];
+  const def = CAL_DEFAULT[id];
+  return (
+    <div className="grid grid-cols-[3.4rem_1fr_1fr_1fr] items-center gap-1.5">
+      <span className="font-mono text-[10px] text-fg">{meta.short}</span>
+      <label className="flex flex-col text-[9px] text-faint">
+        home
+        <input
+          type="number"
+          value={cal.home}
+          onChange={(e) => setCalEntry(id, { home: Number(e.target.value) || 0 })}
+          className="mt-0.5 h-8 w-full rounded bg-surface-2 px-2 font-mono text-[11px] text-fg shadow-[var(--shadow-border)] outline-none"
+          aria-label={`${meta.label} home`}
+        />
+      </label>
+      <label className="flex flex-col text-[9px] text-faint">
+        repos°
+        <input
+          type="number"
+          value={cal.rest}
+          onChange={(e) => setCalEntry(id, { rest: Number(e.target.value) || 0 })}
+          className="mt-0.5 h-8 w-full rounded bg-surface-2 px-2 font-mono text-[11px] text-fg shadow-[var(--shadow-border)] outline-none"
+          aria-label={`${meta.label} repos`}
+        />
+      </label>
+      <label className="flex flex-col text-[9px] text-faint">
+        sens
+        <select
+          value={cal.dir}
+          onChange={(e) => setCalEntry(id, { dir: Number(e.target.value) as 1 | -1 })}
+          className="mt-0.5 h-8 w-full rounded bg-surface-2 px-1 font-mono text-[11px] text-fg shadow-[var(--shadow-border)] outline-none"
+          aria-label={`${meta.label} sens`}
+        >
+          <option value={1}>+1</option>
+          <option value={-1}>−1</option>
+        </select>
+      </label>
+      <button
+        type="button"
+        onClick={() => setCalEntry(id, { ...def })}
+        className="col-span-4 h-6 rounded text-[10px] text-faint hover:text-fg"
+        aria-label={`Réinitialiser ${meta.label}`}
+      >
+        ↺ défaut ({def.home}·{def.rest}·{def.dir > 0 ? "+" : "−"})
+      </button>
+    </div>
+  );
+}
 
 function PinList({ title, pins }: { title: string; pins: HeaderPin[] }) {
   return (
@@ -158,6 +212,21 @@ export function KitPanel() {
             <li key={s}>{s}</li>
           ))}
         </ol>
+      </div>
+
+      <div>
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-faint">Calibration servo ↔ scène</p>
+        <p className="mt-1 text-[11px] leading-relaxed text-muted">
+          Le firmware pilote des angles servo bruts (HOME 90·118·48·108·72) ; la scène
+          3D travaille en angles géométriques. Cette table fait le pont — ajuste
+          <span className="text-fg"> home / repos / sens</span> une fois, après le calage
+          des cornes.
+        </p>
+        <div className="mt-2 flex flex-col gap-1">
+          {JOINT_IDS.map((id) => (
+            <CalRow key={id} id={id} />
+          ))}
+        </div>
       </div>
 
       <div>
