@@ -1,0 +1,4 @@
+TFT_eSPI
+ESP32Servo
+ArduinoJson@6.21.5
+WebSockets (Markus Sattler)

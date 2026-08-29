@@ -1,0 +1,40 @@
+Câblage LilyGO T-Display S3
+===========================
+Alim servos : 5 V 3 A EXTERNE. GND commun avec le header GND.
+Ne jamais alimenter 5 servos par le 5V USB de la carte.
+GPIO15 POWER_ON et GPIO38 backlight : le firmware les force HIGH.
+
+Header P2 (gauche, du 3V3 vers le 5V)
+-------------------------------------
+3V3      — ne pas servir les servos
+GPIO1    servo BASE        (signal orange)
+GPIO2    servo ÉPAULE
+GPIO3    servo COUDE       (strapping : brancher APRÈS le boot)
+GPIO10   servo POIGNET
+GPIO11   servo PINCE
+GPIO12   HC-SR04 TRIG
+GPIO13   HC-SR04 ECHO      (5 V → 3V3 : pont 1k/2k conseillé)
+GND      masse commune servos + HC-SR04
+5V       VBUS USB — interdit pour les servos
+
+Header P1 (droit) — libre
+-------------------------
+GPIO18 / 17   I²C optionnel
+GPIO21 / 16   PWM de rechange
+GPIO43 / 44   UART0 — laisser
+
+Servos  Brun/noir → GND alim 5 V (+ un fil vers GND T-Display)
+        Rouge     → +5 V alim externe
+        Orange    → GPIO
+
+ESP32-CAM
+---------
+Alim 5 V propre. Rejoint PINCE / pince1234, IP fixe 192.168.4.2
+Stream http://192.168.4.2:81/stream
+GPIO4 = flash LED (éteint par le firmware)
+
+Téléphone
+---------
+Wi-Fi PINCE  mot de passe pince1234
+Studio → Kit → ws://192.168.4.1:81 → Lier le LilyGO
+Œil → http://192.168.4.2:81/stream

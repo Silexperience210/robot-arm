@@ -1,0 +1,43 @@
+Flash
+=====
+
+A. LilyGO T-Display S3
+----------------------
+Arduino IDE 2
+Cartes : « esp32 » par Espressif (3.x)
+Carte : ESP32S3 Dev Module
+USB CDC On Boot : Enabled
+PSRAM : OPI PSRAM
+Flash : 16 MB QIO
+Upload speed : 921600
+
+Bibliothèques :
+  TFT_eSPI
+  ESP32Servo
+  ArduinoJson 6.21.x   (pas la 7)
+  WebSockets (Markus Sattler)
+
+TFT_eSPI : Arduino/libraries/TFT_eSPI/User_Setup_Select.h
+  commenter   #include <User_Setup.h>
+  décommenter #include <User_Setups/Setup206_LilyGo_T_Display_S3.h>
+(le fichier firmware/TFT_eSPI-setup.h est le pense-bête)
+
+Ouvrir firmware/pince-tdisplay-s3/pince-tdisplay-s3.ino
+Maintenir BOOT, brancher l'USB-C, flasher, relâcher BOOT, reset.
+L'écran affiche PINCE. AP Wi-Fi PINCE.
+
+B. ESP32-CAM AI-Thinker
+-----------------------
+Carte : AI Thinker ESP32-CAM
+PSRAM : Enabled
+Partition : Huge APP
+
+USB-TTL 5 V :
+  U0R  ← TX
+  U0T  → RX
+  GND  — GND
+  5V   — 5V
+  GPIO0 au GND pendant le flash, puis relâcher + RST
+
+Ouvrir firmware/pince-esp32-cam/pince-esp32-cam.ino
+La CAM rejoint PINCE, IP 192.168.4.2, stream :81/stream

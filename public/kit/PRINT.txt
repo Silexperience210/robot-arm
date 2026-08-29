@@ -1,0 +1,49 @@
+Impression
+==========
+Slicer : Prusa / Cura / Orca
+Couche : 0.20 mm
+Buse : 0.4 mm
+Parois : 3  (4 pour 01-base, 02-yoke, 03-link-120)
+Infill : 25 % gyroid
+         32 % pour 01-base, 02-yoke, 03-link-120
+Matériau : PLA OK · PETG mieux près de l'imprimante
+Plateau : 60 °C PLA · 80 °C PETG
+Supports : OUI seulement
+  06-jaw (pad en porte-à-faux)
+  07-tdisplay-cradle (cavité + lèvres)
+  02-shoulder-yoke (poche servo)
+  12-frame-clamp (poche 2020)
+
+Orientation (déjà dans le STL)
+------------------------------
+01-base              face vis vers le plateau
+02-shoulder-yoke     disque corne sur le plateau
+03 / 04-link         à plat, bossage corne vers le haut
+05-palm              poche servo vers le haut
+06-jaw               face plane sur le plateau
+07-cradle            fond sur le plateau
+08-cam-mount         plaque sur le plateau
+09-us-bracket        colliers vers le haut
+10-bin               fond sur le plateau
+11-cable-clip        n'importe
+12-frame-clamp       face ouverte vers le haut
+
+Assemblage (40 min)
+-------------------
+1. Servo base dans 01-base, vis de corne
+2. 02-yoke visé sur cette corne. Servo épaule dans le U
+3. 03-link-120 visé sur la corne d'épaule
+4. Servo coude en bout de 03, 04-link-105 sur sa corne
+5. Servo poignet + 05-palm
+6. Servo pince dans la paume, 2× 06-jaw en miroir sur la corne
+7. HC-SR04 dans 09, visé sous la paume
+8. T-Display S3 clipsé dans 07 (USB-C dégagé, 64,5 × 33,5 mm)
+9. ESP32-CAM dans 08, objectif vers le plateau
+10. 2× 10-bin à gauche / droite. 11-clips le long du bras
+11. 12-frame-clamp sur un 2020 de l'imprimante, 01-base par-dessus (M3)
+
+Calage
+------
+Avant de visser les cornes : flasher, alimenter, attendre HOME
+base 90 · épaule 118 · coude 48 · poignet 108 · pince 72
+Puis visser. Sinon le bras tape le plateau.

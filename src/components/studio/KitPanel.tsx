@@ -9,7 +9,7 @@ import {
   type HeaderPin,
   TDISPLAY,
 } from "@/lib/arm/board";
-import { CAM_INO, downloadKitZip, downloadText, FIRMWARE_INO, OPENSCAD, PI_BRIDGE, TFT_SETUP } from "@/lib/arm/kit";
+import { CAM_INO, downloadKitZip, downloadPublic, downloadText, FIRMWARE_INO, KIT_STLS, OPENSCAD, PI_BRIDGE, TFT_SETUP } from "@/lib/arm/kit";
 import { useArm } from "@/lib/arm/store";
 import { cn } from "@/lib/utils";
 import { TDisplay } from "./TDisplay";
@@ -86,7 +86,7 @@ export function KitPanel() {
       <div className="flex flex-col gap-2">
         <Button type="button" onClick={() => void downloadKitZip()}>
           <Download />
-          Kit complet (.zip)
+          Kit complet (.zip) — 12 STL + firmware
         </Button>
         <Button
           type="button"
@@ -128,6 +128,25 @@ export function KitPanel() {
           <Download />
           Pont Raspberry Pi
         </Button>
+      </div>
+
+      <div>
+        <p className="text-xs font-medium uppercase tracking-[0.14em] text-faint">STL · pièce par pièce</p>
+        <ul className="mt-2 flex flex-col gap-0.5">
+          {KIT_STLS.map((s) => (
+            <li key={s.file}>
+              <button
+                type="button"
+                onClick={() => void downloadPublic(`/kit/stl/${s.file}`, s.file)}
+                className="flex h-11 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-surface-2"
+              >
+                <span className="w-6 shrink-0 font-mono tabular-nums text-accent">×{s.qty}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-fg">{s.file}</span>
+                <span className="hidden shrink-0 text-faint sm:inline">{s.note}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
 
       <div>

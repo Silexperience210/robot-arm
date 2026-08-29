@@ -5,7 +5,7 @@ export const TDISPLAY = {
   name: "LilyGO T-Display S3",
   short: "T-Display S3",
   screen: { w: 320, h: 170, driver: "ST7789", bus: "i8080 8-bit" },
-  pcb: "62.3 × 38 mm · USB-C · PSRAM 8 Mo",
+  pcb: "64,5 × 33,5 mm · USB-C · PSRAM 8 Mo",
   apSsid: "PINCE",
   apPass: "pince1234",
   wsUrl: "ws://192.168.4.1:81",

@@ -1,0 +1,36 @@
+Nomenclature PINCE
+==================
+
+Déjà chez toi
+-------------
+1× LilyGO T-Display S3
+5× servo 9g SG90 (épaule : MG90S si tu as)
+1× ESP32-CAM AI-Thinker (OV2640)
+1× HC-SR04
+1× Raspberry Pi 4 (optionnel)
+1× imprimante 3D
+
+À imprimer
+----------
+1× 01-base.stl
+1× 02-shoulder-yoke.stl
+1× 03-link-120.stl          (épaule → coude, carénage hex)
+1× 04-link-105.stl          (coude → poignet, carénage hex)
+1× 05-palm.stl
+2× 06-jaw.stl               (miroir la 2e dans le slicer)
+1× 07-tdisplay-cradle.stl
+1× 08-cam-mount.stl
+1× 09-us-bracket.stl
+2× 10-bin.stl
+4× 11-cable-clip.stl
+1× 12-frame-clamp.stl       (profilé 2020 de l'imprimante)
+
+À acheter (~8–15 €)
+-------------------
+Vis M2 × 8 mm (cornes + mâchoires)     × 16
+Vis M3 × 12 mm + écrous (base)         × 4
+Vis M5 × 25 mm + écrou T 2020          × 1
+Alim 5 V 3 A (jack ou USB-C PD + buck)
+Fil Dupont femelle 15 cm
+2× colliers
+(option) palets caoutchouc 1 mm sous les mâchoires
