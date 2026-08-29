@@ -1,10 +1,12 @@
 import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { Group, Mesh } from "three";
 import { DoubleSide } from "three";
+import * as THREE from "three";
 import { STLLoader } from "three-stdlib";
 import { ARM_DIM, BIN_POS, BIN_RIGHT, KIND_META, PRINTER, type WorldPart } from "@/lib/arm/types";
+import { forwardKinematics } from "@/lib/arm/kinematics";
 import { useArm, visual } from "@/lib/arm/store";
 
 const D2R = Math.PI / 180;
@@ -137,6 +139,47 @@ function ArmRig({ m }: { m: Mats }) {
     if (jawL.current) jawL.current.rotation.x = open;
     if (jawR.current) jawR.current.rotation.x = -open;
   });
+
+  /* ── Autotest FK : la scène 3D doit matcher forwardKinematics ────── */
+  useEffect(() => {
+    const tcpMarker = new THREE.Object3D();
+    tcpMarker.position.set(0, 0, ARM_DIM.l3);
+    if (wrist.current) wrist.current.add(tcpMarker);
+
+    (window as unknown as Record<string, unknown>).__ARM_TEST = (pose?: Partial<Record<string, number>>) => {
+      const s = useArm.getState();
+      const g = { ...s.target, ...(pose ?? {}) };
+      s.setTarget(g);
+      if (base.current) base.current.rotation.y = (g.base - 90) * D2R;
+      if (shoulder.current) shoulder.current.rotation.x = (90 - g.shoulder) * D2R;
+      if (elbow.current) elbow.current.rotation.x = (90 - g.elbow) * D2R;
+      if (wrist.current) wrist.current.rotation.x = (90 - g.wrist) * D2R;
+      base.current?.updateMatrixWorld(true);
+      const fk = forwardKinematics(g);
+      const pick = (o: THREE.Object3D | null) => {
+        const v = new THREE.Vector3();
+        return o ? o.getWorldPosition(v).toArray() : null;
+      };
+      const sceneElbow = pick(elbow.current);
+      const sceneWrist = pick(wrist.current);
+      const sceneTcp = pick(tcpMarker);
+      const err = (a: number[] | null, b: number[]) =>
+        a && b ? Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 1000 : -1;
+      return {
+        pose: g,
+        fk: { elbow: fk.elbow, wrist: fk.wrist, tcp: fk.tcp },
+        scene: { elbow: sceneElbow, wrist: sceneWrist, tcp: sceneTcp },
+        errMm: {
+          elbow: err(sceneElbow, fk.elbow),
+          wrist: err(sceneWrist, fk.wrist),
+          tcp: err(sceneTcp, fk.tcp),
+        },
+      };
+    };
+    return () => {
+      tcpMarker.removeFromParent();
+    };
+  }, []);
 
   return (
     <group>
