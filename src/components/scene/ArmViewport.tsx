@@ -1,7 +1,9 @@
 import { ContactShadows, Grid, OrbitControls } from "@react-three/drei";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import type { Group, Mesh } from "three";
+import { DoubleSide } from "three";
+import { STLLoader } from "three-stdlib";
 import { ARM_DIM, BIN_POS, BIN_RIGHT, KIND_META, PRINTER, type WorldPart } from "@/lib/arm/types";
 import { useArm, visual } from "@/lib/arm/store";
 
@@ -75,14 +77,55 @@ function Ticker() {
   return null;
 }
 
+/* ── STL réels du kit (jumeau numérique exact) ──────────────────────
+ * Pivots (repère STL, mm) et rotations de montage (STL → scène).
+ * Scène : Y = hauteur, le bras s'étend le long de +Z, rotations autour de X.
+ */
+const STL_PARTS: Record<string, { pivot: [number, number, number]; rot: [number, number, number] }> = {
+  base:    { pivot: [0, 0, 0],  rot: [-Math.PI / 2, 0, 0] },
+  yoke:    { pivot: [0, 0, 0],  rot: [-Math.PI / 2, 0, -Math.PI / 2] },
+  link120: { pivot: [0, 0, 0],  rot: [0, -Math.PI / 2, -Math.PI / 2] },
+  link105: { pivot: [0, 0, 0],  rot: [0, -Math.PI / 2, -Math.PI / 2] },
+  palm:    { pivot: [0, 0, 5],  rot: [0, -Math.PI / 2, -Math.PI / 2] },
+  jaw:     { pivot: [0, 0, 16], rot: [0, Math.PI, -Math.PI / 2] },
+};
+
+const STL_NAMES: Record<string, string> = {
+  base: "01-base", yoke: "02-shoulder-yoke", link120: "03-link-120",
+  link105: "04-link-105", palm: "05-palm", jaw: "06-jaw",
+  cradle: "07-tdisplay-cradle", cam: "08-cam-mount", us: "09-us-bracket",
+  bin: "10-bin", clip: "11-cable-clip", clamp: "12-frame-clamp",
+};
+
+function StlPart({ name, m, position }: { name: string; m: Mats; position?: [number, number, number] }) {
+  const geo = useLoader(STLLoader, `/kit/stl/${STL_NAMES[name]}.stl`);
+  const prepared = useMemo(() => {
+    const p = STL_PARTS[name];
+    if (!p) return geo;
+    const g = geo.clone();
+    g.translate(-p.pivot[0] / 1000, -p.pivot[1] / 1000, -p.pivot[2] / 1000);
+    g.rotateX(p.rot[0]);
+    g.rotateY(p.rot[1]);
+    g.rotateZ(p.rot[2]);
+    g.scale(0.001, 0.001, 0.001);
+    g.computeVertexNormals();
+    return g;
+  }, [geo]);
+  return (
+    <mesh geometry={prepared} castShadow receiveShadow position={position}>
+      <meshStandardMaterial {...m.pla} side={DoubleSide} />
+    </mesh>
+  );
+}
+
 function ArmRig({ m }: { m: Mats }) {
   const base = useRef<Group>(null);
   const shoulder = useRef<Group>(null);
   const elbow = useRef<Group>(null);
   const wrist = useRef<Group>(null);
-  const jawL = useRef<Mesh>(null);
-  const jawR = useRef<Mesh>(null);
-  const { l1, l2, l3 } = ARM_DIM;
+  const jawL = useRef<Group>(null);
+  const jawR = useRef<Group>(null);
+  const { l1, l2 } = ARM_DIM;
 
   useFrame(() => {
     const j = visual.current;
@@ -90,64 +133,31 @@ function ArmRig({ m }: { m: Mats }) {
     if (shoulder.current) shoulder.current.rotation.x = (90 - j.shoulder) * D2R;
     if (elbow.current) elbow.current.rotation.x = (90 - j.elbow) * D2R;
     if (wrist.current) wrist.current.rotation.x = (90 - j.wrist) * D2R;
-    const open = 0.002 + (j.grip / 90) * 0.016;
-    if (jawL.current) jawL.current.position.x = -open - 0.007;
-    if (jawR.current) jawR.current.position.x = open + 0.007;
+    const open = 0.05 + (j.grip / 90) * 0.55;
+    if (jawL.current) jawL.current.rotation.x = open;
+    if (jawR.current) jawR.current.rotation.x = -open;
   });
 
   return (
     <group>
-      <mesh position={[0, 0.005, 0]} receiveShadow castShadow>
-        <cylinderGeometry args={[0.048, 0.052, 0.01, 28]} />
-        <meshStandardMaterial {...m.pla} />
-      </mesh>
-      <mesh position={[0, 0.016, 0]} castShadow>
-        <cylinderGeometry args={[0.026, 0.03, 0.016, 24]} />
-        <meshStandardMaterial {...m.plaLight} />
-      </mesh>
-      <group ref={base} position={[0, 0.026, 0]}>
-        <Servo m={m} />
-        <mesh position={[0, 0.012, 0]} castShadow>
-          <cylinderGeometry args={[0.018, 0.02, 0.012, 20]} />
-          <meshStandardMaterial {...m.pla} />
-        </mesh>
-        <group ref={shoulder} position={[0, 0.016, 0]}>
-          <group rotation={[0, 0, Math.PI / 2]} position={[-0.014, 0, 0]}>
-            <Servo m={m} />
-          </group>
-          <Link m={m} length={l1} />
+      {/* Socle fixe : la vraie base STL (ne tourne pas) */}
+      <StlPart name="base" m={m} />
+      {/* Plateau tournant (corne du servo base) */}
+      <group ref={base} position={[0, 0.022, 0]}>
+        <StlPart name="yoke" m={m} position={[0, 0.018, 0]} />
+        <group ref={shoulder} position={[0, 0.018, 0]}>
+          <StlPart name="link120" m={m} />
           <group ref={elbow} position={[0, 0, l1]}>
-            <group rotation={[0, 0, Math.PI / 2]}>
-              <Servo m={m} />
-            </group>
-            <Link m={m} length={l2} wide={0.014} />
+            <StlPart name="link105" m={m} />
             <group ref={wrist} position={[0, 0, l2]}>
-              <Servo m={m} scale={0.82} />
-              <mesh position={[0, 0, 0.01]} castShadow>
-                <boxGeometry args={[0.022, 0.016, 0.024]} />
-                <meshStandardMaterial {...m.pla} />
-              </mesh>
-              <group position={[0, 0, l3 - 0.01]}>
-                <mesh castShadow>
-                  <boxGeometry args={[0.028, 0.016, 0.022]} />
-                  <meshStandardMaterial {...m.plaLight} />
-                </mesh>
-                <mesh position={[0, 0.01, -0.004]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-                  <cylinderGeometry args={[0.004, 0.004, 0.01, 10]} />
-                  <meshStandardMaterial {...m.pad} />
-                </mesh>
-                <mesh position={[0.007, 0.01, -0.004]} rotation={[Math.PI / 2, 0, 0]}>
-                  <cylinderGeometry args={[0.003, 0.003, 0.008, 8]} />
-                  <meshStandardMaterial {...m.horn} />
-                </mesh>
-                <mesh ref={jawL} position={[-0.01, 0, 0.016]} castShadow>
-                  <boxGeometry args={[0.005, 0.014, 0.038]} />
-                  <meshStandardMaterial {...m.pad} />
-                </mesh>
-                <mesh ref={jawR} position={[0.01, 0, 0.016]} castShadow>
-                  <boxGeometry args={[0.005, 0.014, 0.038]} />
-                  <meshStandardMaterial {...m.pad} />
-                </mesh>
+              <StlPart name="palm" m={m} />
+              <group position={[0, 0, 0.03]}>
+                <group ref={jawL} position={[-0.0065, 0, 0.01]}>
+                  <StlPart name="jaw" m={m} />
+                </group>
+                <group ref={jawR} position={[0.0065, 0, 0.01]} scale={[-1, 1, 1]}>
+                  <StlPart name="jaw" m={m} />
+                </group>
               </group>
             </group>
           </group>
