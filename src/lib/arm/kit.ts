@@ -1,0 +1,518 @@
+export const FIRMWARE_INO = `// PINCE — LilyGO T-Display S3 (ESP32-S3, ST7789 170×320)
+// Arduino : ESP32S3 Dev Module · USB CDC On Boot Enabled · OPI PSRAM · Flash 16MB
+// TFT_eSPI : User_Setup_Select.h → Setup206_LilyGo_T_Display_S3.h
+// Libs : TFT_eSPI, ESP32Servo, ArduinoJson, WebSockets by Markus Sattler
+//
+// Header P2 (gauche) :
+//   GPIO1 base · GPIO2 épaule · GPIO3 coude · GPIO10 poignet · GPIO11 pince
+//   GPIO12 TRIG · GPIO13 ECHO · GND commun · 5V = VBUS USB (ne pas y brancher les servos)
+// Alim servos : 5 V 3 A EXTERNE + GND commun.
+// GPIO15 = POWER_ON écran — le firmware le met à HIGH.
+// BTN2 (GPIO14) court = home · long = stop
+// Wi-Fi AP : PINCE / pince1234 · ws://192.168.4.1:81
+// JSON {"t":"pose","j":{"base":90,"shoulder":118,"elbow":48,"wrist":108,"grip":72},"spd":0.6}
+
+#include <WiFi.h>
+#include <WebSocketsServer.h>
+#include <ESP32Servo.h>
+#include <ArduinoJson.h>
+#include <TFT_eSPI.h>
+
+#define PIN_POWER 15
+#define PIN_BTN2  14
+#define PIN_BATT  4
+#define PIN_TRIG  12
+#define PIN_ECHO  13
+
+const int SERVO_PIN[5] = {1, 2, 3, 10, 11};
+const char* KEYS[5] = {"base","shoulder","elbow","wrist","grip"};
+const char* LABELS[5] = {"BASE","EPAU","COUDE","POIG","PINCE"};
+const int SMAX[5] = {180,180,180,180,90};
+
+const char* AP_SSID = "PINCE";
+const char* AP_PASS = "pince1234";
+
+TFT_eSPI tft;
+Servo srv[5];
+WebSocketsServer ws(81);
+
+float cur[5] = {90, 118, 48, 108, 72};
+float tgt[5] = {90, 118, 48, 108, 72};
+float spd = 0.6f;
+uint32_t lastDraw = 0, lastBtn = 0, pressAt = 0;
+bool pressed = false;
+int clients = 0;
+
+int clampi(int v, int a, int b){ return v < a ? a : (v > b ? b : v); }
+
+void applyPose() {
+  for (int i = 0; i < 5; i++) {
+    cur[i] += (tgt[i] - cur[i]) * (0.08f + 0.28f * spd);
+    srv[i].write(clampi((int)(cur[i] + 0.5f), 0, SMAX[i]));
+  }
+}
+
+float usCm() {
+  digitalWrite(PIN_TRIG, LOW); delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH); delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+  long d = pulseIn(PIN_ECHO, HIGH, 18000);
+  if (!d) return -1;
+  return d / 58.0f;
+}
+
+float battV() {
+  // Pont diviseur LilyGO sur GPIO4
+  return analogReadMilliVolts(PIN_BATT) * 2.0f / 1000.0f;
+}
+
+void sendState(uint8_t n) {
+  StaticJsonDocument<256> doc;
+  doc["t"] = "state";
+  JsonObject j = doc.createNestedObject("j");
+  for (int i = 0; i < 5; i++) j[KEYS[i]] = (int)cur[i];
+  doc["us"] = usCm();
+  doc["v"] = battV();
+  String s; serializeJson(doc, s);
+  ws.sendTXT(n, s);
+}
+
+void onWs(uint8_t n, WStype_t type, uint8_t * payload, size_t length) {
+  if (type == WStype_CONNECTED) { clients++; return; }
+  if (type == WStype_DISCONNECTED) { clients = max(0, clients - 1); return; }
+  if (type != WStype_TEXT) return;
+  StaticJsonDocument<384> doc;
+  if (deserializeJson(doc, payload, length)) return;
+  const char* t = doc["t"] | "";
+  if (!strcmp(t, "ping")) { sendState(n); return; }
+  if (!strcmp(t, "stop") || !strcmp(t, "home")) {
+    if (!strcmp(t, "home")) {
+      const float h[5] = {90, 118, 48, 108, 72};
+      for (int i = 0; i < 5; i++) tgt[i] = h[i];
+    } else {
+      for (int i = 0; i < 5; i++) tgt[i] = cur[i];
+    }
+    return;
+  }
+  if (!strcmp(t, "pose")) {
+    JsonObject j = doc["j"];
+    for (int i = 0; i < 5; i++) if (j.containsKey(KEYS[i])) tgt[i] = j[KEYS[i]];
+    if (doc.containsKey("spd")) spd = doc["spd"];
+  }
+}
+
+void drawUi() {
+  const uint16_t BG = 0x1082, FG = 0xE73B, MUT = 0x8C71, ACC = 0xC616, OK = 0x8DE9;
+  static bool chrome = false;
+  static int lastBar[5] = {-1,-1,-1,-1,-1};
+  static int lastUs = -999;
+  static int lastCli = -1;
+  if (!chrome) {
+    tft.fillScreen(BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(ACC, BG);
+    tft.drawString("PINCE", 8, 6, 2);
+    tft.setTextColor(MUT, BG);
+    tft.drawString("T-DISPLAY S3", 70, 10, 1);
+    for (int i = 0; i < 5; i++) {
+      int y = 28 + i * 22;
+      tft.setTextDatum(TL_DATUM);
+      tft.setTextColor(MUT, BG);
+      tft.drawString(LABELS[i], 8, y, 1);
+    }
+    tft.setTextColor(MUT, BG);
+    tft.drawString("BTN2 home", 220, 144, 1);
+    chrome = true;
+  }
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%.2fV", battV());
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(OK, BG);
+  tft.drawString(buf, 312, 8, 1);
+
+  for (int i = 0; i < 5; i++) {
+    int w = (int)(200.0f * cur[i] / SMAX[i]);
+    if (w == lastBar[i]) continue;
+    lastBar[i] = w;
+    int y = 28 + i * 22;
+    tft.fillRect(56, y + 2, 200, 10, 0x2104);
+    tft.fillRect(56, y + 2, w, 10, ACC);
+    snprintf(buf, sizeof(buf), "%3d", (int)cur[i]);
+    tft.setTextDatum(TR_DATUM);
+    tft.setTextColor(FG, BG);
+    tft.drawString(buf, 312, y, 1);
+  }
+
+  float d = usCm();
+  int di = (int)(d * 10);
+  if (di != lastUs || clients != lastCli) {
+    lastUs = di; lastCli = clients;
+    tft.fillRect(8, 142, 200, 16, BG);
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(MUT, BG);
+    if (d < 0) tft.drawString("US --", 8, 144, 1);
+    else {
+      snprintf(buf, sizeof(buf), "US %.1f cm", d);
+      tft.drawString(buf, 8, 144, 1);
+    }
+    tft.setTextColor(clients ? OK : MUT, BG);
+    tft.drawString(clients ? "WS ON" : "AP PINCE", 120, 144, 1);
+  }
+}
+
+void handleBtn() {
+  bool down = digitalRead(PIN_BTN2) == LOW;
+  uint32_t now = millis();
+  if (down && !pressed) { pressed = true; pressAt = now; }
+  if (!down && pressed) {
+    pressed = false;
+    uint32_t dt = now - pressAt;
+    if (dt > 50 && dt < 700) {
+      const float h[5] = {90, 118, 48, 108, 72};
+      for (int i = 0; i < 5; i++) tgt[i] = h[i];
+    } else if (dt >= 700) {
+      for (int i = 0; i < 5; i++) tgt[i] = cur[i];
+    }
+  }
+}
+
+void setup() {
+  pinMode(PIN_POWER, OUTPUT);
+  digitalWrite(PIN_POWER, HIGH); // obligatoire : alimente LCD + periphs
+  pinMode(PIN_BTN2, INPUT_PULLUP);
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+  analogReadResolution(12);
+
+  Serial.begin(115200);
+  delay(150);
+  tft.init();
+  tft.setRotation(1); // 320 × 170
+  tft.fillScreen(0x1082);
+
+  for (int i = 0; i < 5; i++) {
+    srv[i].setPeriodHertz(50);
+    srv[i].attach(SERVO_PIN[i], 500, 2500);
+    srv[i].write((int)cur[i]);
+  }
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(AP_SSID, AP_PASS);
+  ws.begin();
+  ws.onEvent(onWs);
+  Serial.println(WiFi.softAPIP());
+  drawUi();
+}
+
+void loop() {
+  ws.loop();
+  applyPose();
+  handleBtn();
+  if (millis() - lastDraw > 180) {
+    lastDraw = millis();
+    drawUi();
+  }
+  delay(8);
+}
+`;
+
+export const TFT_SETUP = `// Copier dans Arduino/libraries/TFT_eSPI/User_Setup_Select.h
+// Commenter #include <User_Setup.h>
+// Décommenter la ligne :
+
+#include <User_Setups/Setup206_LilyGo_T_Display_S3.h>
+`;
+
+export const CAM_INO = `// PINCE — ESP32-CAM AI-Thinker (OV2640)
+// Arduino : AI Thinker ESP32-CAM · PSRAM Enabled · Huge APP
+// Flash : USB-TTL 5V, U0R←TX, U0T→RX, GND, GPIO0 au GND pendant le flash
+// Rejoint l'AP du T-Display S3 : PINCE / pince1234
+// Stream : http://192.168.4.2:81/stream   Still : http://192.168.4.2/capture
+
+#include "esp_camera.h"
+#include <WiFi.h>
+#include "esp_http_server.h"
+
+const char* SSID = "PINCE";
+const char* PASS = "pince1234";
+
+#define PWDN_GPIO_NUM     32
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM      0
+#define SIOD_GPIO_NUM     26
+#define SIOC_GPIO_NUM     27
+#define Y9_GPIO_NUM       35
+#define Y8_GPIO_NUM       34
+#define Y7_GPIO_NUM       39
+#define Y6_GPIO_NUM       36
+#define Y5_GPIO_NUM       21
+#define Y4_GPIO_NUM       19
+#define Y3_GPIO_NUM       18
+#define Y2_GPIO_NUM        5
+#define VSYNC_GPIO_NUM    25
+#define HREF_GPIO_NUM     23
+#define PCLK_GPIO_NUM     22
+#define FLASH_GPIO         4
+
+httpd_handle_t stream_httpd = NULL;
+httpd_handle_t cam_httpd = NULL;
+
+static const char* STREAM_CT = "multipart/x-mixed-replace;boundary=frame";
+
+static esp_err_t stream_handler(httpd_req_t *req) {
+  camera_fb_t * fb = NULL;
+  esp_err_t res = ESP_OK;
+  char part[64];
+  httpd_resp_set_type(req, STREAM_CT);
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  while (true) {
+    fb = esp_camera_fb_get();
+    if (!fb) { res = ESP_FAIL; break; }
+    size_t hlen = snprintf(part, sizeof(part),
+      "--frame\\r\\nContent-Type: image/jpeg\\r\\nContent-Length: %u\\r\\n\\r\\n", fb->len);
+    res = httpd_resp_send_chunk(req, part, hlen);
+    if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char*)fb->buf, fb->len);
+    if (res == ESP_OK) res = httpd_resp_send_chunk(req, "\\r\\n", 2);
+    esp_camera_fb_return(fb);
+    if (res != ESP_OK) break;
+  }
+  return res;
+}
+
+static esp_err_t capture_handler(httpd_req_t *req) {
+  camera_fb_t * fb = esp_camera_fb_get();
+  if (!fb) return ESP_FAIL;
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  esp_err_t r = httpd_resp_send(req, (const char*)fb->buf, fb->len);
+  esp_camera_fb_return(fb);
+  return r;
+}
+
+void startCameraServer() {
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.server_port = 80;
+  httpd_uri_t cap = { .uri="/capture", .method=HTTP_GET, .handler=capture_handler, .user_ctx=NULL };
+  if (httpd_start(&cam_httpd, &config) == ESP_OK) httpd_register_uri_handler(cam_httpd, &cap);
+  config.server_port = 81;
+  config.ctrl_port = 32769;
+  httpd_uri_t st = { .uri="/stream", .method=HTTP_GET, .handler=stream_handler, .user_ctx=NULL };
+  if (httpd_start(&stream_httpd, &config) == ESP_OK) httpd_register_uri_handler(stream_httpd, &st);
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(FLASH_GPIO, OUTPUT);
+  digitalWrite(FLASH_GPIO, LOW);
+
+  camera_config_t config;
+  config.ledc_channel = LEDC_CHANNEL_0;
+  config.ledc_timer = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM; config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM; config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM; config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM; config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk = XCLK_GPIO_NUM;
+  config.pin_pclk = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href = HREF_GPIO_NUM;
+  config.pin_sscb_sda = SIOD_GPIO_NUM;
+  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.frame_size = FRAMESIZE_VGA;
+  config.jpeg_quality = 12;
+  config.fb_count = 2;
+  config.fb_location = CAMERA_FB_IN_PSRAM;
+  config.grab_mode = CAMERA_GRAB_LATEST;
+  if (esp_camera_init(&config) != ESP_OK) {
+    Serial.println("cam init fail");
+    return;
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(SSID, PASS);
+  for (int i = 0; i < 40 && WiFi.status() != WL_CONNECTED; i++) delay(250);
+  Serial.println(WiFi.localIP());
+  startCameraServer();
+}
+
+void loop() { delay(10000); }
+`;
+
+export const PI_BRIDGE = `#!/usr/bin/env python3
+# PINCE — pont Raspberry Pi 4 (optionnel) vers LilyGO T-Display S3
+# python3 pince-pi.py --esp ws://192.168.4.1:81
+
+import argparse, asyncio, json, websockets
+from aiohttp import web
+
+ESP = None
+clients = set()
+
+async def pump_esp(url):
+    global ESP
+    while True:
+        try:
+            async with websockets.connect(url) as ws:
+                ESP = ws
+                async for msg in ws:
+                    for c in list(clients):
+                        await c.send_str(msg)
+        except Exception as e:
+            print("esp", e)
+            await asyncio.sleep(2)
+
+async def ws_handler(request):
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    clients.add(ws)
+    try:
+        async for msg in ws:
+            if msg.type == web.WSMsgType.TEXT and ESP:
+                await ESP.send(msg.data)
+    finally:
+        clients.discard(ws)
+    return ws
+
+async def health(_):
+    return web.json_response({"ok": True, "esp": ESP is not None})
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--esp", default="ws://192.168.4.1:81")
+    p.add_argument("--port", type=int, default=8088)
+    args = p.parse_args()
+    app = web.Application()
+    app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/health", health)
+    loop = asyncio.get_event_loop()
+    loop.create_task(pump_esp(args.esp))
+    web.run_app(app, host="0.0.0.0", port=args.port)
+
+if __name__ == "__main__":
+    main()
+`;
+
+export const OPENSCAD = `// PINCE — pack imprimable 5 DDL + pince + berceau LilyGO T-Display S3
+// OpenSCAD · F6 → STL · mm · 0.2 mm, 3 parois, 25–30 % infill, PLA/PETG
+
+$fn = 48;
+sg90_body = [23.2, 12.4, 22.5];
+sg90_flange = [32.2, 12.4, 2.6];
+clear = 0.35;
+
+module sg90_pocket() {
+  cube(sg90_body + [clear, clear, 8], center=true);
+  translate([0,0,sg90_body.z/2]) cube(sg90_flange + [clear, clear, 0], center=true);
+}
+
+module plate_base() {
+  difference() {
+    hull() {
+      for (x=[-38,38], y=[-38,38]) translate([x,y,0]) cylinder(h=6, r=6);
+    }
+    for (a=[0,90,180,270]) rotate([0,0,a]) translate([32,32,-1]) cylinder(h=10, d=3.3);
+    translate([0,0,8]) sg90_pocket();
+  }
+}
+
+module link(len=110, thick=8, wide=16) {
+  difference() {
+    union() {
+      hull() {
+        cylinder(h=thick, d=wide);
+        translate([len,0,0]) cylinder(h=thick, d=wide-2);
+      }
+      translate([0,0,thick]) cylinder(h=4, d=7);
+    }
+    translate([0,0,-1]) cylinder(h=thick+8, d=2.2);
+    translate([len,0,-1]) cylinder(h=thick+8, d=2.2);
+    for (i=[1:4]) rotate([0,0,i*90]) translate([4.6,0,-1]) cylinder(h=6, d=1.4);
+  }
+}
+
+module jaw() {
+  difference() {
+    union() {
+      cube([8, 12, 36], center=true);
+      translate([0,0,16]) cube([8, 18, 8], center=true);
+      translate([5,0,-10]) cube([10, 3, 16], center=true);
+    }
+    translate([0,0,16]) rotate([90,0,0]) cylinder(h=20, d=2.2, center=true);
+  }
+}
+
+module gripper_palm() {
+  difference() {
+    cube([34, 22, 14], center=true);
+    translate([0,0,4]) cube([18, 14, 12], center=true);
+    for (x=[-10,10]) translate([x,0,0]) rotate([90,0,0]) cylinder(h=30, d=2.2, center=true);
+  }
+}
+
+// Berceau T-Display S3 — carte ~64 × 32 × 8, USB-C dégagé, boutons accessibles
+module tdisplay_cradle() {
+  difference() {
+    rounded(70, 38, 10, 3);
+    translate([3, 3, 3]) rounded(64, 32, 10, 2);
+    translate([-1, 12, 4]) cube([8, 10, 8]); // USB-C
+    translate([28, -1, 6]) cube([16, 6, 6]); // BTN2 / BOOT
+  }
+}
+
+module cam_mount() {
+  difference() {
+    union() {
+      cube([36, 10, 4]);
+      translate([8, 10, 0]) cube([20, 18, 4]);
+      translate([12, 22, 4]) cylinder(h=8, d=10);
+    }
+    translate([18, 28, -1]) cylinder(h=16, d=6.2); // objectif
+    for (x=[4, 32]) translate([x, 5, -1]) cylinder(h=8, d=2.2);
+  }
+}
+
+module rounded(x, y, z, r) {
+  hull() {
+    for (ix=[r, x-r], iy=[r, y-r]) translate([ix, iy, 0]) cylinder(h=z, r=r);
+  }
+}
+
+module assembly() {
+  plate_base();
+  translate([0,0,28]) rotate([0,90,0]) link(120);
+  translate([0,0,28]) rotate([0,90,35]) translate([120,0,0]) link(105);
+  translate([90,40,8]) gripper_palm();
+  translate([90,60,8]) jaw();
+  translate([90,78,8]) mirror([1,0,0]) jaw();
+  translate([-90, -20, 0]) tdisplay_cradle();
+  translate([40, -50, 0]) cam_mount();
+}
+
+assembly();
+`;
+
+export function downloadText(filename: string, content: string, mime = "text/plain") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadKitZip() {
+  const res = await fetch("/pince-kit.zip");
+  if (!res.ok) throw new Error("zip introuvable");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "PINCE-kit.zip";
+  a.click();
+  URL.revokeObjectURL(url);
+}

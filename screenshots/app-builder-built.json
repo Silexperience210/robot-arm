@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "PINCE",
+      "hasCanvas": true,
+      "bodyTextLen": 1189,
+      "bodyTextHash": "c9bd7e5dc7561e7090eea955289a83b551be4ea699a90f9e96b7cd3d231247d6",
+      "bodyTextPrefix": "PINCE T-Display S3 · teach pendant · vision Simulateur Libre US ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "PINCE",
+      "hasCanvas": true,
+      "bodyTextLen": 864,
+      "bodyTextHash": "d45851ae645f880afada7902ecf35c465c27c05c4e94c0fdb4f7d436cbc2b1ec",
+      "bodyTextPrefix": "PINCE T-Display S3 · teach pendant · vision Simulateur Libre sim",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}
